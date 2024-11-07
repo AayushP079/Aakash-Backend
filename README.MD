@@ -12,7 +12,7 @@ python -m pip install --upgrade pip
 .venv/.gitignore
 ```
 
-``bash
+```bash
 pip install -r requirements.txt
 ```
 
