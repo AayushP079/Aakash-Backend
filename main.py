@@ -54,3 +54,10 @@ async def scrape_form(url: str):
         raise HTTPException(status_code=500, detail=f"Error fetching the page: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error during parsing: {str(e)}")
+
+@app.post("/api/documentUpload")
+def userData():
+
+    return "Thanks"
+
+
