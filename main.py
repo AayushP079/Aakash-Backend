@@ -1,6 +1,6 @@
 import os
 from typing import Union
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 import requests
@@ -11,10 +11,12 @@ from PyPDF2 import PdfReader
 import google.generativeai as genai
 from config import GOOGLE_API_KEY
 from PyPDF2 import PdfReader
-from dotenv import load_dotenv
+from db import get_db_collection
+from datetime import datetime
+import random
+import string
 
-load_dotenv()
-genai.configure(api_key=GOOGLE_API_KEY)
+
 
 app = FastAPI()
 app.add_middleware(
@@ -27,6 +29,7 @@ app.add_middleware(
 class ScrapeResponse(BaseModel):
     message: str
     extractedText: List[str]
+
 
 @app.get("/")
 def read_root():
@@ -66,10 +69,12 @@ async def scrape_form(url: str):
         raise HTTPException(status_code=500, detail=f"Error during parsing: {str(e)}")
 
 
-
+class UploadData(BaseModel):
+    name: str
+    email: str
 
 @app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), name: str = Form(...), email: str = Form(...)):
     upload_dir = './uploaded_files'
     os.makedirs(upload_dir, exist_ok=True)  # Create directory if not exists
     file_location = os.path.join(upload_dir, file.filename)
@@ -82,5 +87,27 @@ async def upload_file(file: UploadFile = File(...)):
     file = genai.upload_file(file_location, mime_type=file.content_type)
     model = genai.GenerativeModel("gemini-1.5-flash")
     response = model.generate_content(["Give me a data in csv format with correct value", file])
+    
 
-    return JSONResponse(content={"data": response.text})
+    # Prepare the data to be saved in MongoDB
+    username = name.replace(" ", "_")  # Replace spaces with underscores for the collection name
+    unique_number = random.randint(1000, 9999)  # Generate a random number
+    collection_name = f"{username}_{unique_number}"
+
+     # Prepare data to be saved in MongoDB
+    data_dict = {
+        "name": name,
+        "email": email,
+        "content": response.text,
+        "uploaded_at": datetime.utcnow()
+    }
+
+    # Save data into a dynamic collection
+    collection = get_db_collection(collection_name)
+    collection.insert_one(data_dict)
+
+
+    # remove current file after extracting data
+    os.remove(file_location)
+
+    return JSONResponse(content={"data": response.text, "status": "Data saved to database."})
