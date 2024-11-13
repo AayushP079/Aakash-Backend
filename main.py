@@ -1,10 +1,20 @@
+import os
 from typing import Union
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
+from fastapi.responses import JSONResponse
 import requests
 from bs4 import BeautifulSoup
 from typing import List, Optional
 from fastapi.middleware.cors import CORSMiddleware
+from PyPDF2 import PdfReader
+import google.generativeai as genai
+from config import GOOGLE_API_KEY
+from PyPDF2 import PdfReader
+from dotenv import load_dotenv
+
+load_dotenv()
+genai.configure(api_key=GOOGLE_API_KEY)
 
 app = FastAPI()
 app.add_middleware(
@@ -26,7 +36,7 @@ def read_root():
 def read_item(item_id: int, q: Union[str, None] = None):
     return {"item_id": item_id, "q": q}
 
-@app.get("/scrape", response_model=ScrapeResponse)
+@app.get("/api/scrape", response_model=ScrapeResponse)
 async def scrape_form(url: str):
     try:
         # Step 1: Fetch HTML content using requests
@@ -55,9 +65,22 @@ async def scrape_form(url: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error during parsing: {str(e)}")
 
-@app.post("/api/documentUpload")
-def userData():
-
-    return "Thanks"
 
 
+
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    upload_dir = './uploaded_files'
+    os.makedirs(upload_dir, exist_ok=True)  # Create directory if not exists
+    file_location = os.path.join(upload_dir, file.filename)
+    
+    # Save file locally
+    with open(file_location, "wb") as f:
+        f.write(await file.read())
+
+    # Process with GenAI
+    file = genai.upload_file(file_location, mime_type=file.content_type)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    response = model.generate_content(["Give me a data in csv format with correct value", file])
+
+    return JSONResponse(content={"data": response.text})
