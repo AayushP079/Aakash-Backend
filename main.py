@@ -15,6 +15,9 @@ from db import get_db_collection
 from datetime import datetime
 import random
 import string
+import csv
+from io import StringIO
+from PIL import Image, ImageDraw, ImageFont
 
 
 
@@ -30,6 +33,7 @@ class ScrapeResponse(BaseModel):
     message: str
     extractedText: List[str]
 
+# 
 
 @app.get("/")
 def read_root():
@@ -73,6 +77,14 @@ class UploadData(BaseModel):
     name: str
     email: str
 
+# Function to convert CSV text to a list of dictionaries
+def csv_to_dict(csv_text: str) -> List[dict]:
+    # Use StringIO to treat the string as a file-like object
+    csv_file = StringIO(csv_text)
+    reader = csv.DictReader(csv_file)
+    # Convert rows into a list of dictionaries
+    return [row for row in reader]
+
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...), name: str = Form(...), email: str = Form(...)):
     upload_dir = './uploaded_files'
@@ -88,6 +100,7 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), email
     model = genai.GenerativeModel("gemini-1.5-flash")
     response = model.generate_content(["Give me a data in csv format with correct value", file])
     
+    csv_as_dict = csv_to_dict(response.text)
 
     # Prepare the data to be saved in MongoDB
     username = name.replace(" ", "_")  # Replace spaces with underscores for the collection name
@@ -98,9 +111,10 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), email
     data_dict = {
         "name": name,
         "email": email,
-        "content": response.text,
+        "content": csv_as_dict,
         "uploaded_at": datetime.utcnow()
     }
+
 
     # Save data into a dynamic collection
     collection = get_db_collection(collection_name)
@@ -110,4 +124,89 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), email
     # remove current file after extracting data
     os.remove(file_location)
 
-    return JSONResponse(content={"data": response.text, "status": "Data saved to database."})
+    return JSONResponse(content={"data": csv_as_dict, "status": "Data saved to database."})
+
+@app.post("/api/fill_form")
+async def fill_form_endpoint(file: UploadFile = File(...), name: str = Form(...), email: str = Form(...)):
+    upload_dir = './uploaded_files'
+    os.makedirs(upload_dir, exist_ok=True)  # Create directory if not exists
+    file_location = os.path.join(upload_dir, file.filename)
+    
+    # Save file locally
+    with open(file_location, "wb") as f:
+        f.write(await file.read())
+
+    # Query the database to get the data
+    username = name.replace(" ", "_")  # Replace spaces with underscores for the collection name
+    collection = get_db_collection(username)
+    data = collection.find_one({"email": email})
+    
+    if not data:
+        raise HTTPException(status_code=404, detail="Data not found for the provided email")
+
+    # Extract fields from OCR result
+    ocr_result = data["content"]
+    fields = extract_fields(ocr_result)
+
+    # Parse the OCR result to get bounding boxes
+    boxes, txts, scores = parse_result(ocr_result)
+
+    # Fill the form with the extracted fields
+    fill_form(fields, boxes, file_location)
+
+    # Return the filled form as a response
+    return FileResponse('output2.png', media_type='image/png', filename='output2.png')
+
+def extract_fields(ocr_result):
+    fields = {}
+    for line in ocr_result:
+        for word_info in line:
+            field_name = word_info[1][0]
+            fields[field_name] = None
+    return fields
+
+def parse_result(result):
+    """
+    Returns a tuple of bboxes_list, detected_text_list, confidence_list
+    """
+    boxes = [line[0] for line in result]
+    txts = [line[1][0] for line in result]
+    scores = [line[1][1] for line in result]
+    return boxes, txts, scores
+
+def fill_form(fields, boxes, image_path):
+    image = Image.open(image_path)
+    draw = ImageDraw.Draw(image)
+    fontSize = (boxes[0][2][1] - boxes[0][0][1])
+    font = ImageFont.truetype("/content/simfang.ttf", fontSize)
+
+    x_shift = 3 * (boxes[0][1][0] - boxes[0][0][0])
+    y_shift = 10 * (boxes[0][1][1] - boxes[0][0][1])
+
+    delta_x = boxes[1][1][0] - boxes[0][1][0]
+    delta_y = boxes[1][1][1] - boxes[0][1][1]
+    # Determine Coordinates of empty space
+    for i in range(len(boxes)):
+        box_coordinate = boxes[i]
+        if delta_x < delta_y:
+            shifted_coordinate = [
+                [coord[0] + x_shift, coord[1]]
+                for coord in box_coordinate
+            ]
+        else:
+            shifted_coordinate = [
+                [coord[0], coord[1] + y_shift]
+                for coord in box_coordinate
+            ]
+        print(shifted_coordinate)
+
+        text = list(fields.values())[i]
+        # Skip if text is None
+        if text is not None:
+            position = (shifted_coordinate[0][0], shifted_coordinate[0][1])
+            draw.text(position, text, font=font, fill=(0, 0, 0))
+        else:
+            # Handle the case where there are more boxes than fields
+            print(f"Warning: No field value for box index {i}")
+
+    image.save('output2.png')
