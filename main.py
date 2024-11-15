@@ -20,6 +20,11 @@ import csv
 from io import StringIO
 from PIL import Image, ImageDraw, ImageFont
 from paddleocr import PaddleOCR
+import joblib
+
+# Loading the vectorizer and classifer
+vectorizer = joblib.load("models/vectorizer.joblib")
+classifier = joblib.load("models/classifier.joblib")
 
 
 
@@ -100,8 +105,9 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), email
     # Process with GenAI
     file = genai.upload_file(file_location, mime_type=file.content_type)
     model = genai.GenerativeModel("gemini-1.5-flash")
-    response = model.generate_content(["Give me a data in csv format with correct value", file])
+    response = model.generate_content(["Give me a data in csv format with correct value.", file])
     
+    print(response.text)
     csv_as_dict = csv_to_dict(response.text)
 
     # Prepare the data to be saved in MongoDB
@@ -143,6 +149,9 @@ async def fill_form_endpoint(file: UploadFile = File(...), name: str = Form(...)
     # print(collection)
     print(email)
     data = collection.find_one({"email": email})
+    print("collection size")
+    col_size = len(data)
+    print("collection Size",col_size)
 
     
     if not data:
@@ -151,6 +160,8 @@ async def fill_form_endpoint(file: UploadFile = File(...), name: str = Form(...)
     # Extract fields from OCR result
     form_data = data["content"][0]
 
+
+
     ocr = PaddleOCR(use_angle_cls=True, lang='en')
     results = ocr.ocr(file_location, cls=True)
 
@@ -158,22 +169,67 @@ async def fill_form_endpoint(file: UploadFile = File(...), name: str = Form(...)
 
     fields = extract_fields(results)
 
+    form_data = predict_and_update_keys(form_data)
+
+    print("fields")
+    print(fields)
+
     # Parse the OCR result to get bounding boxes
     boxes, txts, scores = parse_result(result)
     print("formdata:")
     print(form_data)
+
+#  Assign values from fields to form_data
+    for key, value in fields.items():
+        if key in form_data:
+            fields[key] = form_data[key]
+    
+    print("After filled:")
+    print(fields)
+
+    print("len of boxes", len(boxes), boxes)
+    print("len of fields", len(fields), fields)
     # Fill the form with the extracted fields
-    fill_form(form_data, boxes, file_location)
+    fill_form(fields, boxes, file_location)
 
     # Return the filled form as a response
     return FileResponse('output2.png', media_type='image/png', filename='output2.png')
 
+def predict_and_update_keys(data: dict) -> dict:
+    """
+    Predict and update the keys of the given dictionary using the vectorizer and classifier.
+    """
+    original_keys = list(data.keys())
+    
+    # Transform the keys using the vectorizer
+    input_tfidf = vectorizer.transform(original_keys)
+    
+    # Predict the standardized keys
+    predicted_keys = classifier.predict(input_tfidf)
+    
+    # Create a new dictionary with the predicted keys
+    updated_data = {}
+    for original_key, predicted_key in zip(original_keys, predicted_keys):
+        updated_data[predicted_key] = data[original_key]
+    
+    return updated_data
+
 def extract_fields(ocr_result):
     fields = {}
+    field_names = []
     for line in ocr_result:
         for word_info in line:
             field_name = word_info[1][0]
-            fields[field_name] = None
+            field_names.append(field_name)
+
+    # Use the vectorizer and classifier to predict standard field keys
+    if field_names:
+        input_tfidf = vectorizer.transform(field_names)
+        predicted_keys = classifier.predict(input_tfidf)
+
+        # Map predicted keys to original field names
+        fields = {predicted_key: None for predicted_key in predicted_keys}
+
     return fields
 
 def parse_result(result):
@@ -196,6 +252,7 @@ def fill_form(fields, boxes, image_path):
 
     delta_x = boxes[1][1][0] - boxes[0][1][0]
     delta_y = boxes[1][1][1] - boxes[0][1][1]
+    print(len(boxes))
     # Determine Coordinates of empty space
     for i in range(len(boxes)):
         box_coordinate = boxes[i]
@@ -210,8 +267,10 @@ def fill_form(fields, boxes, image_path):
                 for coord in box_coordinate
             ]
         print(shifted_coordinate)
-
+        print("fields:")
+        print(list(fields.values()))
         text = list(fields.values())[i]
+
         # Skip if text is None
         if text is not None:
             position = (shifted_coordinate[0][0], shifted_coordinate[0][1])
