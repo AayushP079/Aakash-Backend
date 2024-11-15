@@ -19,6 +19,7 @@ import string
 import csv
 from io import StringIO
 from PIL import Image, ImageDraw, ImageFont
+from paddleocr import PaddleOCR
 
 
 
@@ -129,7 +130,7 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), email
 
 @app.post("/api/fill_form")
 async def fill_form_endpoint(file: UploadFile = File(...), name: str = Form(...), email: str = Form(...)):
-    upload_dir = './uploaded_files'
+    upload_dir = './uploaded_files/form'
     os.makedirs(upload_dir, exist_ok=True)  # Create directory if not exists
     file_location = os.path.join(upload_dir, file.filename)
     
@@ -141,16 +142,22 @@ async def fill_form_endpoint(file: UploadFile = File(...), name: str = Form(...)
     username = name.replace(" ", "_")  # Replace spaces with underscores for the collection name
     collection = get_db_collection(username)
     data = collection.find_one({"email": email})
+    print(data)
     
     if not data:
         raise HTTPException(status_code=404, detail="Data not found for the provided email")
 
     # Extract fields from OCR result
-    ocr_result = data["content"]
-    fields = extract_fields(ocr_result)
+    form_data = data["content"]
+    ocr = PaddleOCR(use_angle_cls=True, lang='en')
+    results = ocr.ocr(file_location, cls=True)
+
+    result = results[0]
+
+    fields = extract_fields(results)
 
     # Parse the OCR result to get bounding boxes
-    boxes, txts, scores = parse_result(ocr_result)
+    boxes, txts, scores = parse_result(result)
 
     # Fill the form with the extracted fields
     fill_form(fields, boxes, file_location)
