@@ -3,6 +3,7 @@ from typing import Union
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse
 import requests
 from bs4 import BeautifulSoup
 from typing import List, Optional
