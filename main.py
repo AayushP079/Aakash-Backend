@@ -140,16 +140,17 @@ async def fill_form_endpoint(file: UploadFile = File(...), name: str = Form(...)
     username = name.replace(" ", "_")  # Replace spaces with underscores for the collection name
     print(username)
     collection = get_db_collection(email)
-    print(collection)
+    # print(collection)
     print(email)
     data = collection.find_one({"email": email})
-    print(data)
+
     
     if not data:
         raise HTTPException(status_code=404, detail="Data not found for the provided email")
 
     # Extract fields from OCR result
-    form_data = data["content"]
+    form_data = data["content"][0]
+
     ocr = PaddleOCR(use_angle_cls=True, lang='en')
     results = ocr.ocr(file_location, cls=True)
 
@@ -159,9 +160,10 @@ async def fill_form_endpoint(file: UploadFile = File(...), name: str = Form(...)
 
     # Parse the OCR result to get bounding boxes
     boxes, txts, scores = parse_result(result)
-
+    print("formdata:")
+    print(form_data)
     # Fill the form with the extracted fields
-    fill_form(fields, boxes, file_location)
+    fill_form(form_data, boxes, file_location)
 
     # Return the filled form as a response
     return FileResponse('output2.png', media_type='image/png', filename='output2.png')

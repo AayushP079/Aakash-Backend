@@ -27,3 +27,7 @@ pip freeze > requirements.txt
 fastapi dev main.py
 
 ```
+
+For fixing the opengl library error:
+``` sudo apt-get update
+sudo apt-get install -y libgl1-mesa-glx ```

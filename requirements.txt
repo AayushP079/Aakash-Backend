@@ -58,6 +58,7 @@ packaging==24.2
 paddleocr==2.9.1
 paddlepaddle==2.6.2
 pillow==11.0.0
+opencv-python
 proto-plus==1.25.0
 protobuf==5.28.3
 pyasn1==0.6.1
