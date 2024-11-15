@@ -187,7 +187,7 @@ def fill_form(fields, boxes, image_path):
     image = Image.open(image_path)
     draw = ImageDraw.Draw(image)
     fontSize = (boxes[0][2][1] - boxes[0][0][1])
-    font = ImageFont.truetype("/content/simfang.ttf", fontSize)
+    font = ImageFont.truetype("./fonts/simfang.ttf", fontSize)
 
     x_shift = 3 * (boxes[0][1][0] - boxes[0][0][0])
     y_shift = 10 * (boxes[0][1][1] - boxes[0][0][1])
