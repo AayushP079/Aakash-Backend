@@ -105,9 +105,7 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), email
     csv_as_dict = csv_to_dict(response.text)
 
     # Prepare the data to be saved in MongoDB
-    username = name.replace(" ", "_")  # Replace spaces with underscores for the collection name
-    unique_number = random.randint(1000, 9999)  # Generate a random number
-    collection_name = f"{username}_{unique_number}"
+    collection_name = email
 
      # Prepare data to be saved in MongoDB
     data_dict = {
@@ -140,7 +138,10 @@ async def fill_form_endpoint(file: UploadFile = File(...), name: str = Form(...)
 
     # Query the database to get the data
     username = name.replace(" ", "_")  # Replace spaces with underscores for the collection name
-    collection = get_db_collection(username)
+    print(username)
+    collection = get_db_collection(email)
+    print(collection)
+    print(email)
     data = collection.find_one({"email": email})
     print(data)
     
