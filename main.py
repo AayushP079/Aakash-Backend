@@ -29,6 +29,11 @@ classifier = joblib.load("models/classifier.joblib")
 
 
 app = FastAPI()
+
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+MONGO_URI = os.getenv('MONGO_URI')
+DEBUG = os.getenv('DEBUG', 'False') == 'True'
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow all origins, change to specific URLs in production
