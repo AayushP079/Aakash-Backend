@@ -29,11 +29,11 @@ classifier = joblib.load("models/classifier.joblib")
 
 class KIEConfig:
     def __init__(self):
-        self.args = Namespace(
+          self.args = Namespace(
             kie_algorithm='LayoutXLM',
-            ser_model_dir='path/to/ser_vi_layoutxlm_xfund_infer',
-            ser_dict_path='path/to/xfund_class_list.txt',
-            vis_font_path='./fonts/simfang.ttf',
+            ser_model_dir='models/ser_vi_layoutxlm_xfund_infer',
+            ser_dict_path='ppocr/utils/dict/kie_dict/xfund_class_list.txt',
+            vis_font_path='fonts/simfang.ttf',
             ocr_order_method='tb-yx',
             use_angle_cls=True,
             det_model_dir=None,
