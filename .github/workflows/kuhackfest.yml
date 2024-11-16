@@ -24,11 +24,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Install graphicslib
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-glx
-
       - name: Zip the application files
         run: |
           zip -r app.zip . -x "*.git*" "*/venv/*"
@@ -39,4 +34,6 @@ jobs:
           app-name: 'kuhackfest'
           publish-profile: ${{ secrets.AzureAppService_PublishProfile }}
           package: app.zip
-          startup-command: uvicorn main:app --host 0.0.0.0 --port 8000
+          python-version: '3.9'
+          startup-command: |
+            gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app
