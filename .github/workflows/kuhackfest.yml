@@ -34,4 +34,3 @@ jobs:
           app-name: 'kuhackfest'  # Replace with your Azure Web App name
           publish-profile: ${{ secrets.AzureAppService_PublishProfile }}
           package: app.zip
-          startup-command: uvicorn main:app --host 0.0.0.0 --port 8000
