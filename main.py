@@ -21,12 +21,19 @@ from io import StringIO
 from PIL import Image, ImageDraw, ImageFont
 from paddleocr import PaddleOCR
 import joblib
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+import pytesseract
+from time import sleep
+import math
+from PIL import Image, ImageDraw, ImageFont
+import enchant
 
+dictionary = enchant.Dict("en_US")
 # Loading the vectorizer and classifer
 vectorizer = joblib.load("models/vectorizer.joblib")
 classifier = joblib.load("models/classifier.joblib")
-
-
 
 app = FastAPI()
 
@@ -285,3 +292,216 @@ def fill_form(fields, boxes, image_path):
             print(f"Warning: No field value for box index {i}")
 
     image.save('output2.png')
+
+@app.post("/api/fill_box_form")
+async def fill_form_box(file: UploadFile = File(...), name: str = Form(...), email: str = Form(...)):
+    upload_dir = './uploaded_files/form'
+    os.makedirs(upload_dir, exist_ok=True)  # Create directory if not exists
+    file_location = os.path.join(upload_dir, file.filename)
+    
+    # Save file locally
+    with open(file_location, "wb") as f:
+        f.write(await file.read())
+
+    # Query the database to get the data
+    username = name.replace(" ", "_")  # Replace spaces with underscores for the collection name
+    print(username)
+    collection = get_db_collection(email)
+    # print(collection)
+    print(email)
+    data = collection.find_one({"email": email})
+    print("collection size")
+    col_size = len(data)
+    print("collection Size",col_size)
+
+    
+    if not data:
+        raise HTTPException(status_code=404, detail="Data not found for the provided email")
+
+    # Extract fields from OCR result
+    form_data = data["content"][0]
+
+
+
+    image = cv2.imread(file_location)
+
+    # Convert to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Apply thresholding
+    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+
+    # Create kernels for horizontal and vertical line detection
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (50, 1))
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 15))
+
+    # Detect horizontal lines
+    detected_horizontal_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, horizontal_kernel, iterations=2)
+
+    # Detect vertical lines
+    detected_vertical_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, vertical_kernel, iterations=2)
+
+    # Combine detected lines
+    detected_lines_combined = cv2.add(detected_horizontal_lines, detected_vertical_lines)
+
+    edges = cv2.Canny(detected_lines_combined, 50, 150)
+
+    # plt.imshow(edges)
+    # plt.axis('off')
+    # plt.show()
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 3))
+    edges = cv2.dilate(edges, kernel, iterations=2)
+    # plt.imshow(edges)
+    # plt.axis('off')
+    # plt.show()
+
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    min_height = 40
+    max_height = 200
+    min_width = 50
+    cntrRect = []
+    for contour in contours:
+        epsilon = 0.01 * cv2.arcLength(contour, True)
+        approx = cv2.approxPolyDP(contour, epsilon, True)
+
+        # Check if the contour is rectangle
+        if len(approx) == 4:
+            x, y, w, h = cv2.boundingRect(approx)
+            if min_height < h < max_height and w > min_width:
+                # cv2.drawContours(image, [approx], 0, (0, 255, 0), 3)
+                cntrRect.append((x, y, w, h))
+    filteredCntrRect = []
+    detected_text = []
+    skip = False
+    # sorted_cntrRect = sort_rectangles(cntrRect)
+    for i in range(len(cntrRect)-1):
+        if(skip):
+            skip = False
+            continue
+        (x, y, w, h) = cntrRect[i]
+        (x1, y1, w1, h1) = cntrRect[i+1]
+        if(x-50<x1+w1 and abs(y -y1)<20 and (x-x1)>0 ):
+            filteredCntrRect.append((x1,y1,w+x-x1,h))
+            skip = True
+            print("Combining:")
+            print(f"({x},{y}), ({x1} {y1})")
+            # print("=======================")
+            print("After:", filteredCntrRect[-1])
+        else:
+            print(f"({x},{y}), ({x1} {y1})")
+            filteredCntrRect.append(cntrRect[i])
+
+    cntrRect=[]
+    skip = False
+    for i in range(len(filteredCntrRect)-1):
+        if(skip):
+            skip = False
+            continue
+        (x, y, w, h) = filteredCntrRect[i]
+        (x1, y1, w1, h1) = filteredCntrRect[i+1]
+        if(x-50<x1+w1 and abs(y -y1)<20 and (x-x1)>0 ):
+            cntrRect.append((x1,y1,w+x-x1,h))
+            skip = True
+            # print("Combining:")
+            # print(f"({x},{y}), ({x1} {y1})")
+            # print("=======================")
+            # print("After:", cntrRect[-1])
+        else:
+            # print(f"({x},{y}), ({x1} {y1})")
+            cntrRect.append(filteredCntrRect[i])
+
+
+    for i in cntrRect:
+        cv2.rectangle(image, (i[0], i[1]), (i[0] + i[2], i[1] + i[3]), (0, 255, 0), 3)
+        print(i)
+    # sorted_cntrRect = sorted(cntrRect, key=lambda rect: (rect[1] + rect[3] / 2, rect[0] + rect[2] / 2))
+    # for (x, y, w, h) in cntrRect:
+    #     test = cv2.rectangle(image, (x, y), (x + w, y + h), (0, 0, 255), 3)
+    #     wm = plt.get_current_fig_manager()
+    #     wm.window.state('zoomed')
+    #     plt.imshow(test)
+    #     plt.axis('off')
+    #     plt.show()
+    left_offset = 625
+    for (x, y, w, h) in cntrRect:
+        try:
+            # Define regions for text detection
+            left_region = gray[y-20:y+20+h, max(x-left_offset, 0):x]  # Left of contour
+            top_region = gray[max(y-100, 0):y, x:x+w]  # Above contour
+            cut_region = 0
+
+            # Perform OCR on each region with confidence
+            left_data = pytesseract.image_to_data(left_region, config='--psm 6', output_type=pytesseract.Output.DICT)
+            top_data = pytesseract.image_to_data(top_region, config='--psm 6', output_type=pytesseract.Output.DICT)
+
+            left_confidence = max(left_data['conf'], default=-1)
+            top_confidence = max(top_data['conf'], default=-1)
+            confidence = max(left_confidence, top_confidence)
+            if(confidence>70):
+                if left_confidence>80 or (left_confidence > top_confidence and left_confidence != -1):
+                    left_text = " ".join([left_data['text'][i] for i in range(len(left_data['text'])) if int(left_data['conf'][i]) > 0]).strip()
+                    while '|' in left_text or '[' in left_text or ']' in left_text:
+                        left_data = pytesseract.image_to_data(gray[y:y+h, max(x-700+cut_region, 0):x], config='--psm 6', output_type=pytesseract.Output.DICT)
+                        left_text = " ".join([left_data['text'][i] for i in range(len(left_data['text'])) if int(left_data['conf'][i]) > 0]).strip()
+                        cut_region += 25
+                    detected_text.append({"position": "left", "text": left_text, "confidence": left_confidence, "bounding_box": (x, y, w, h)})
+                    cv2.rectangle(image, (max(x - left_offset + cut_region, 0), y-20), (x, y + h+20), (255, 0, 0), 3)
+                    cut_region = 0
+                elif top_confidence != -1:
+                    top_text = " ".join([top_data['text'][i] for i in range(len(top_data['text'])) if int(top_data['conf'][i]) > 0]).strip()
+                    detected_text.append({"position": "top", "text": top_text, "confidence": top_confidence, "bounding_box": (x, y, w, h)})
+                    cv2.rectangle(image, (x, max(y - 100, 0)), (x + w, y), (255, 0, 0), 3)
+        except Exception as e:
+            print(f"Error processing rectangle {x, y, w, h}: {e}")
+    for i in detected_text:
+        print(i)
+    filteredText = []
+    for i in detected_text:
+        try:
+            if ":" == i['text'][-1]:
+                i["text"] = i["text"][:-1]
+        except Exception as e:
+            print("The error is: ", e)
+        if '/' in i["text"]:
+            i["text"].split('/')
+        else:
+            l = i["text"].split()
+        factor = False
+        for k in l:
+            if(dictionary.check(k)):
+                factor = True
+        if(factor):
+            if "other" in i["text"].lower():
+                continue
+            else:
+                filteredText.append(i)
+    fields=[]
+    for i in filteredText:
+        fields.append(i['text'])
+    return fields
+    # form_data = predict_and_update_keys(form_data)
+
+    # print("fields")
+    # print(fields)
+
+    # Parse the OCR result to get bounding boxes
+    # boxes, txts, scores = parse_result(result)
+    # print("formdata:")
+    # print(form_data)
+
+#  Assign values from fields to form_data
+    # for key, value in fields.items():
+    #     if key in form_data:
+    #         fields[key] = form_data[key]
+    
+    # print("After filled:")
+    # print(fields)
+
+    # print("len of boxes", len(boxes), boxes)
+    # print("len of fields", len(fields), fields)
+    # # Fill the form with the extracted fields
+    # fill_form(fields, boxes, file_location)
+
+    # Return the filled form as a response
+    # return FileResponse('output2.png', media_type='image/png', filename='output2.png')
